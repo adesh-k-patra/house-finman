@@ -1,0 +1,59 @@
+{
+    "name": "house-finman-backend",
+    "version": "1.0.0",
+    "description": "House FinMan Backend API - Enterprise-grade security",
+    "main": "dist/app.js",
+    "scripts": {
+        "dev": "tsx watch src/app.ts",
+        "build": "tsc",
+        "start": "node dist/app.js",
+        "db:generate": "prisma generate",
+        "db:push": "prisma db push",
+        "db:migrate": "prisma migrate dev",
+        "db:seed": "tsx prisma/seed.ts",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:coverage": "vitest run --coverage",
+        "lint": "eslint src --ext .ts"
+    },
+    "dependencies": {
+        "@prisma/client": "5.22.0",
+        "@types/node-cron": "^3.0.11",
+        "@types/socket.io": "^3.0.2",
+        "bcryptjs": "^2.4.3",
+        "compression": "^1.7.5",
+        "cookie-parser": "^1.4.7",
+        "cors": "^2.8.5",
+        "csv-parse": "^6.1.0",
+        "dotenv": "^17.2.3",
+        "express": "^4.21.2",
+        "express-rate-limit": "^7.5.0",
+        "helmet": "^8.0.0",
+        "jsonwebtoken": "^9.0.2",
+        "node-cron": "^4.2.1",
+        "socket.io": "^4.8.3",
+        "uuid": "^11.1.0",
+        "winston": "^3.17.0",
+        "zod": "^3.24.2"
+    },
+    "devDependencies": {
+        "@types/bcryptjs": "^2.4.6",
+        "@types/compression": "^1.7.5",
+        "@types/cookie-parser": "^1.4.8",
+        "@types/cors": "^2.8.17",
+        "@types/express": "^5.0.0",
+        "@types/jsonwebtoken": "^9.0.7",
+        "@types/node": "^22.10.5",
+        "@types/uuid": "^10.0.0",
+        "prisma": "5.22.0",
+        "tsx": "^4.19.2",
+        "typescript": "^5.7.3",
+        "vitest": "^2.1.8"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "prisma": {
+        "seed": "tsx prisma/seed.ts"
+    }
+}

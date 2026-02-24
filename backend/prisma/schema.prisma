@@ -1,0 +1,1029 @@
+// ===========================================
+// Prisma Database Schema for House FinMan
+// Enterprise-grade schema with full audit trail
+// ===========================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ===========================================
+// Multi-tenancy & Users
+// ===========================================
+
+model Tenant {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  domain      String?
+  logo        String?
+  isActive    Boolean  @default(true)
+  
+  settings    String     @default("{}")
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  users       User[]
+  leads       Lead[]
+  partners    Partner[]
+  vendors     Vendor[]
+  properties  Property[]
+  tickets     Ticket[]
+  campaigns   Campaign[]
+  surveys     Survey[]
+  surveyTemplates SurveyTemplate[]
+  insights    Insight[]
+  opportunities Opportunity[]
+  loans       Loan[]
+  
+  @@index([slug])
+}
+
+model User {
+  id              String    @id @default(uuid())
+  email           String    @unique
+  passwordHash    String
+  name            String
+  avatar          String?
+  phone           String?
+  
+  role            String    @default("viewer") // super_admin, tenant_admin, viewer, partner_admin, agent, vendor_manager, finance, cx, mentor
+  permissions     String      @default("[]")
+  
+  isActive        Boolean   @default(true)
+  isEmailVerified Boolean   @default(false)
+  isMfaEnabled    Boolean   @default(false)
+  mfaSecret       String?
+  
+  lastLoginAt     DateTime?
+  failedLoginAttempts Int   @default(0)
+  lockedUntil     DateTime?
+  
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id])
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  refreshTokens   RefreshToken[]
+  auditLogs       AuditLog[]
+  assignedLeads   Lead[]    @relation("AssignedAgent")
+  createdLeads    Lead[]    @relation("CreatedBy")
+  tickets         Ticket[]  @relation("AssignedTo")
+  createdTickets  Ticket[]  @relation("TicketCreatedBy")
+  createdSurveys  Survey[]  @relation("SurveyCreatedBy")
+  assignedFeedback FeedbackThread[] @relation("FeedbackAssignedTo")
+  customerLoans   Loan[]    @relation("CustomerLoans")
+  managedLoans    Loan[]    @relation("ManagedLoans")
+  
+  @@index([email])
+  @@index([tenantId])
+  @@index([role])
+}
+
+model RefreshToken {
+  id          String   @id @default(uuid())
+  token       String   @unique
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  revokedAt   DateTime?
+  
+  userAgent   String?
+  ipAddress   String?
+  deviceId    String?
+  
+  @@index([token])
+  @@index([userId])
+}
+
+// ===========================================
+// Audit & Security Logging
+// ===========================================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+  
+  action      String   // CREATE, UPDATE, DELETE, LOGIN, LOGOUT, PERMISSION_CHANGE, etc.
+  resource    String   // User, Lead, Partner, etc.
+  resourceId  String?
+  
+  oldValue    String?
+  newValue    String?
+  
+  ipAddress   String?
+  userAgent   String?
+  
+  status      String   @default("success") // success, failure
+  errorMessage String?
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([userId])
+  @@index([action])
+  @@index([resource])
+  @@index([createdAt])
+}
+
+// ===========================================
+// Leads Management
+// ===========================================
+
+model Lead {
+  id              String   @id @default(uuid())
+  
+  // Contact Info
+  firstName       String
+  lastName        String
+  email           String?
+  phone           String
+  alternatePhone  String?
+  
+  // Source & Attribution
+  source          String   // website, referral, partner, campaign, cold_call, walk_in
+  sourceDetails   String?
+  campaignId      String?
+  campaign        Campaign? @relation(fields: [campaignId], references: [id])
+  
+  // Status & Pipeline
+  status          String   @default("new") // new, contacted, qualified, negotiation, won, lost
+  score           Int      @default(0)
+  priority        String   @default("medium") // low, medium, high, urgent
+  
+  // Property Interest
+  interestedIn    String?  // property type preference
+  budget          Float?
+  location        String?
+  tags            String   @default("[]") // JSON array of tags
+  
+  // Assignment
+  assignedToId    String?
+  assignedTo      User?    @relation("AssignedAgent", fields: [assignedToId], references: [id])
+  
+  createdById     String
+  createdBy       User     @relation("CreatedBy", fields: [createdById], references: [id])
+  
+  // Tenant
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  
+  // Timestamps
+  lastContactedAt DateTime?
+  lastInteractionAt DateTime?
+  convertedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  opportunity     Opportunity?
+  notes           LeadNote[]
+  activities      LeadActivity[]
+  loans           Loan[]
+  
+  @@index([tenantId])
+  @@index([status])
+  @@index([assignedToId])
+  @@index([createdAt])
+}
+
+model LeadNote {
+  id        String   @id @default(uuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  
+  content   String
+  createdAt DateTime @default(now())
+  
+  @@index([leadId])
+}
+
+model LeadActivity {
+  id          String   @id @default(uuid())
+  leadId      String
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  
+  type        String   // call, email, meeting, note, status_change
+  title       String?
+  description String
+  metadata    String?
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([leadId])
+  @@index([type])
+}
+
+// ===========================================
+// Opportunities / Pipeline
+// ===========================================
+
+model Opportunity {
+  id              String   @id @default(uuid())
+  
+  name            String
+  value           Float
+  probability     Int      @default(50) // 0-100
+  
+  stage           String   @default("qualification") // qualification, proposal, negotiation, closed_won, closed_lost
+  
+  leadId          String?  @unique
+  lead            Lead?    @relation(fields: [leadId], references: [id])
+  
+  propertyId      String?
+  property        Property? @relation(fields: [propertyId], references: [id])
+  
+  expectedCloseDate DateTime?
+  actualCloseDate   DateTime?
+  
+  notes           String?
+  
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([tenantId])
+  @@index([stage])
+}
+
+// ===========================================
+// Partners
+// ===========================================
+
+model Partner {
+  id              String   @id @default(uuid())
+  
+  // Basic Info
+  name            String
+  type            String   // individual, company, channel_partner
+  email           String
+  phone           String
+  
+  // Company Details (if applicable)
+  companyName     String?
+  gstin           String?
+  pan             String?
+  
+  // Address
+  address         String?
+  city            String?
+  state           String?
+  pincode         String?
+  
+  // Status
+  status          String   @default("pending") // pending, approved, active, inactive, suspended
+  onboardingStatus String  @default("pending") // pending, documents_pending, under_review, approved, rejected
+  
+  // Commission
+  commissionRate  Float    @default(0)
+  totalEarnings   Float    @default(0)
+  
+  // Tenant
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  contracts       PartnerContract[]
+  commissions     Commission[]
+  
+  @@index([tenantId])
+  @@index([status])
+  @@index([email])
+}
+
+model PartnerContract {
+  id          String   @id @default(uuid())
+  partnerId   String
+  partner     Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  
+  title       String
+  type        String   // agreement, nda, addendum
+  status      String   @default("draft") // draft, pending_signature, active, expired, terminated
+  
+  startDate   DateTime
+  endDate     DateTime?
+  
+  documentUrl String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([partnerId])
+  @@index([status])
+}
+
+model Commission {
+  id          String   @id @default(uuid())
+  partnerId   String
+  partner     Partner  @relation(fields: [partnerId], references: [id])
+  
+  amount      Float
+  type        String   // referral, sale, bonus
+  status      String   @default("pending") // pending, approved, paid, rejected
+  
+  reference   String?  // deal/lead reference
+  notes       String?
+  
+  paidAt      DateTime?
+  createdAt   DateTime @default(now())
+  
+  @@index([partnerId])
+  @@index([status])
+}
+
+// ===========================================
+// Vendors
+// ===========================================
+
+model Vendor {
+  id              String   @id @default(uuid())
+  
+  name            String
+  type            String   // supplier, contractor, service_provider
+  email           String
+  phone           String
+  
+  companyName     String?
+  gstin           String?
+  pan             String?
+  
+  address         String?
+  city            String?
+  state           String?
+  pincode         String?
+  
+  status          String   @default("active") // active, inactive, blacklisted
+  rating          Float    @default(0)
+  
+  bankName        String?
+  bankAccount     String?
+  bankIfsc        String?
+  
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  purchaseOrders  PurchaseOrder[]
+  invoices        VendorInvoice[]
+  
+  @@index([tenantId])
+  @@index([status])
+}
+
+model PurchaseOrder {
+  id          String   @id @default(uuid())
+  poNumber    String   @unique
+  
+  vendorId    String
+  vendor      Vendor   @relation(fields: [vendorId], references: [id])
+  
+  items       String     // Array of line items
+  subtotal    Float
+  tax         Float
+  total       Float
+  
+  status      String   @default("draft") // draft, pending_approval, approved, sent, partial, fulfilled, cancelled
+  
+  notes       String?
+  
+  expectedDelivery DateTime?
+  actualDelivery   DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  invoices    VendorInvoice[]
+  
+  @@index([vendorId])
+  @@index([status])
+}
+
+model VendorInvoice {
+  id              String   @id @default(uuid())
+  invoiceNumber   String   @unique
+  
+  vendorId        String
+  vendor          Vendor   @relation(fields: [vendorId], references: [id])
+  
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  
+  amount          Float
+  tax             Float
+  total           Float
+  
+  status          String   @default("pending") // pending, approved, paid, rejected, disputed
+  
+  dueDate         DateTime
+  paidAt          DateTime?
+  
+  documentUrl     String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([vendorId])
+  @@index([status])
+}
+
+// ===========================================
+// Properties
+// ===========================================
+
+model Property {
+  id              String   @id @default(uuid())
+  
+  name            String
+  type            String   // apartment, villa, plot, commercial
+  status          String   @default("available") // available, reserved, sold, under_construction
+  
+  // Location
+  address         String
+  city            String
+  state           String
+  pincode         String
+  latitude        Float?
+  longitude       Float?
+  
+  // Details
+  carpet          Float?   // sq ft
+  builtUp         Float?   // sq ft
+  superBuiltUp    Float?   // sq ft
+  
+  bedrooms        Int?
+  bathrooms       Int?
+  floor           Int?
+  totalFloors     Int?
+  
+  // Pricing
+  basePrice       Float
+  currentPrice    Float
+  pricePerSqft    Float?
+  
+  // Features
+  amenities       String     @default("[]")
+  specifications  String     @default("{}")
+  images          String     @default("[]")
+  documents       String     @default("[]")
+  
+  // Approval
+  approvalStatus  String   @default("pending") // pending, approved, rejected
+  approvedAt      DateTime?
+  
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  opportunities   Opportunity[]
+  
+  @@index([tenantId])
+  @@index([status])
+  @@index([type])
+  @@index([city])
+}
+
+// ===========================================
+// Support & Tickets
+// ===========================================
+
+model Ticket {
+  id              String   @id @default(uuid())
+  ticketNumber    String   @unique
+  
+  subject         String
+  description     String
+  
+  category        String   // billing, technical, sales, general
+  priority        String   @default("medium") // low, medium, high, urgent
+  status          String   @default("open") // open, in_progress, waiting, resolved, closed
+  
+  assignedToId    String?
+  assignedTo      User?    @relation("AssignedTo", fields: [assignedToId], references: [id])
+  
+  createdById     String
+  createdBy       User     @relation("TicketCreatedBy", fields: [createdById], references: [id])
+  
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  
+  resolvedAt      DateTime?
+  closedAt        DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  messages        TicketMessage[]
+  
+  @@index([tenantId])
+  @@index([status])
+  @@index([assignedToId])
+}
+
+model TicketMessage {
+  id          String   @id @default(uuid())
+  ticketId    String
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  
+  content     String
+  isInternal  Boolean  @default(false) // Internal notes vs customer-visible
+  
+  attachments String     @default("[]")
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([ticketId])
+}
+
+model KnowledgeBaseArticle {
+  id          String   @id @default(uuid())
+  
+  title       String
+  slug        String   @unique
+  content     String
+  excerpt     String?
+  
+  category    String
+  tags        String     @default("[]")
+  
+  status      String   @default("draft") // draft, published, archived
+  
+  views       Int      @default(0)
+  helpful     Int      @default(0)
+  notHelpful  Int      @default(0)
+  
+  publishedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([category])
+  @@index([status])
+}
+
+// ===========================================
+// Campaigns
+// ===========================================
+
+model Campaign {
+  id              String   @id @default(uuid())
+  
+  name            String
+  type            String   // email, sms, whatsapp, social, event
+  status          String   @default("draft") // draft, scheduled, running, paused, completed
+  
+  description     String?
+  
+  budget          Float?
+  spent           Float    @default(0)
+  
+  startDate       DateTime?
+  endDate         DateTime?
+  
+  targetAudience  String     @default("{}")
+  content         String     @default("{}")
+  
+  // Metrics
+  sent            Int      @default(0)
+  delivered       Int      @default(0)
+  opened          Int      @default(0)
+  clicked         Int      @default(0)
+  converted       Int      @default(0)
+  
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  leads           Lead[]
+  surveys         Survey[]
+  
+  @@index([tenantId])
+  @@index([status])
+  @@index([type])
+}
+
+// ===========================================
+// System Settings & Configuration
+// ===========================================
+
+model SystemSetting {
+  id          String   @id @default(uuid())
+  
+  key         String   @unique
+  value       String
+  category    String   // general, email, notification, integration
+  description String?
+  
+  isSecret    Boolean  @default(false)
+  
+  updatedAt   DateTime @updatedAt
+  
+  @@index([category])
+}
+
+model Integration {
+  id          String   @id @default(uuid())
+  
+  name        String
+  type        String   // crm, email, sms, payment, calendar
+  provider    String
+  
+  config      String     @default("{}")
+  credentials String     @default("{}") // Encrypted in production
+  
+  isActive    Boolean  @default(false)
+  lastSyncAt  DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([type])
+  @@index([isActive])
+}
+
+model Workflow {
+  id          String   @id @default(uuid())
+  
+  name        String
+  description String?
+  
+  trigger     String   // lead_created, lead_status_change, opportunity_won, etc.
+  conditions  String     @default("[]")
+  actions     String     @default("[]")
+  
+  isActive    Boolean  @default(true)
+  
+  executionCount Int   @default(0)
+  lastExecutedAt DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([trigger])
+  @@index([isActive])
+}
+
+// ===========================================
+// Loans Management
+// ===========================================
+
+model Loan {
+  id              String   @id @default(uuid())
+  loanNumber      String   @unique
+  
+  // Relations
+  leadId          String?
+  lead            Lead?    @relation(fields: [leadId], references: [id])
+  
+  customerId      String?
+  customer        User?    @relation("CustomerLoans", fields: [customerId], references: [id])
+  
+  managerId       String?
+  manager         User?    @relation("ManagedLoans", fields: [managerId], references: [id])
+  
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+
+  // Loan Details
+  type            String   // Home Loan, LAP, Personal, etc.
+  status          String   @default("draft") // draft, applied, processing, approved, disbursed, active, closed, rejected
+  
+  amount          Float
+  interestRate    Float
+  tenureMonths    Int
+  emiAmount       Float?
+  
+  disbursedAmount Float    @default(0)
+  pendingAmount   Float    @default(0)
+  
+  applicationDate DateTime @default(now())
+  approvalDate    DateTime?
+  disbursalDate   DateTime?
+  closureDate     DateTime?
+  
+  // JSON Data (Flexible storage)
+  purpose         String?
+  description     String?
+  
+  // Nested Relations
+  collateral      Collateral[]
+  documents       LoanDocument[]
+  repayments      LoanRepayment[]
+  auditTrail      LoanAuditLog[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([tenantId])
+  @@index([status])
+  @@index([loanNumber])
+}
+
+model Collateral {
+  id              String   @id @default(uuid())
+  loanId          String
+  loan            Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  
+  type            String   // Property, FD, Gold, Vehicle
+  value           Float
+  description     String?
+  
+  ownerName       String?
+  location        String?
+  
+  documents       String   @default("[]") // JSON array of document URLs
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([loanId])
+}
+
+model LoanDocument {
+  id              String   @id @default(uuid())
+  loanId          String
+  loan            Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  
+  title           String
+  type            String   // KYC, Agreement, Income Proof
+  url             String
+  
+  status          String   @default("pending") // pending, verified, rejected
+  verificationDate DateTime?
+  verifiedBy      String?
+  
+  uploadedAt      DateTime @default(now())
+  
+  @@index([loanId])
+}
+
+model LoanRepayment {
+  id              String   @id @default(uuid())
+  loanId          String
+  loan            Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  
+  transactionId   String?  @unique
+  paymentMethod   String   // ACH, NEFT, Cheque
+  
+  amount          Float
+  type            String   // Principal, Interest, Penalty, ProcessingFee
+  
+  status          String   @default("pending") // success, failed, pending, overdue
+  dueDate         DateTime
+  paidDate        DateTime?
+  
+  notes           String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([loanId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+model LoanAuditLog {
+  id              String   @id @default(uuid())
+  loanId          String
+  loan            Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  
+  action          String
+  actorName       String
+  role            String
+  description     String?
+  
+  timestamp       DateTime @default(now())
+  
+  @@index([loanId])
+}
+
+// ===========================================
+// CFM (Customer Feedback Management)
+// ===========================================
+
+model Survey {
+  id              String   @id @default(uuid())
+  title           String
+  description     String?
+  type            String   // nps, csat, ces, product_research, onboarding, churn, custom
+  channel         String   // email, sms, whatsapp, web, link, qr, in_app
+  status          String   @default("draft") // draft, active, paused, ended, archived
+
+  // Configuration
+  isAnonymous     Boolean  @default(false)
+  allowMultiple   Boolean  @default(false)
+  
+  // Design / Branding
+  theme           String   @default("{}") // JSON: primaryColor, logo, etc.
+  
+  // Relations
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  
+  campaignId      String?
+  campaign        Campaign? @relation(fields: [campaignId], references: [id])
+  
+  createdById     String
+  createdBy       User     @relation("SurveyCreatedBy", fields: [createdById], references: [id])
+  
+  questions       SurveyQuestion[]
+  responses       SurveyResponse[]
+  followUpSequence FollowUpSequence?
+  
+  // Metrics Cache
+  totalResponses  Int      @default(0)
+  completionRate  Float    @default(0)
+  avgScore        Float?   // Normalized 0-10 or NPS
+  
+  startDate       DateTime?
+  endDate         DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([tenantId])
+  @@index([status])
+  @@index([campaignId])
+}
+
+model SurveyQuestion {
+  id              String   @id @default(uuid())
+  surveyId        String
+  survey          Survey   @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  
+  text            String
+  type            String   // rating, nps, text, choice, multi_choice, boolean, date
+  order           Int
+  isRequired      Boolean  @default(true)
+  
+  options         String   @default("[]") // JSON array of options for choice types
+  logic           String   @default("{}") // JSON for skip logic
+  
+  // Analysis
+  category        String?  // sentiment, ease, quality, delivery
+  
+  answers         SurveyAnswer[]
+  
+  @@index([surveyId])
+}
+
+model SurveyResponse {
+  id              String   @id @default(uuid())
+  surveyId        String
+  survey          Survey   @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  
+  // Respondent
+  respondentId    String? // If known user
+  respondentEmail String?
+  respondentPhone String?
+  
+  // Metadata
+  status          String   @default("partial") // partial, completed
+  ipAddress       String?
+  userAgent       String?
+  location        String?  // City/Region detected
+  
+  // Scores
+  score           Float?   // Calculated score for this response
+  sentiment       String?  // positive, neutral, negative
+  intentLabel     String?  // High, Medium, Low
+  
+  answers         SurveyAnswer[]
+  feedbackThread  FeedbackThread?
+  
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+  
+  @@index([surveyId])
+  @@index([status])
+  @@index([respondentEmail])
+}
+
+model SurveyAnswer {
+  id              String   @id @default(uuid())
+  responseId      String
+  response        SurveyResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  
+  questionId      String
+  question        SurveyQuestion @relation(fields: [questionId], references: [id])
+  
+  // The answer
+  value           String   // Stored as string, parsed based on question type (number, text, json)
+  
+  // Metadata
+  timeSpent       Int?     // seconds
+  
+  @@index([responseId])
+  @@index([questionId])
+}
+
+model FeedbackThread {
+  id              String   @id @default(uuid())
+  responseId      String   @unique
+  response        SurveyResponse @relation(fields: [responseId], references: [id])
+  
+  status          String   @default("open") // open, replied, closed
+  priority        String   @default("medium")
+  
+  assignedToId    String?
+  assignedTo      User?    @relation("FeedbackAssignedTo", fields: [assignedToId], references: [id])
+  
+  messages        String   @default("[]") // JSON array of { sender, content, timestamp }
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([status])
+  @@index([assignedToId])
+}
+
+model Insight {
+  id              String   @id @default(uuid())
+  
+  title           String
+  description     String
+  type            String   // trend, anomaly, sentiment, correlation
+  confidence      Float    // 0-1
+  
+  source          String   // survey_id, global, campaign
+  sourceId        String?
+  
+  data            String   @default("{}") // JSON supporting data
+  
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([tenantId])
+  @@index([type])
+}
+
+// ===========================================
+// Templates & Follow-ups (Added for Surveys)
+// ===========================================
+
+model SurveyTemplate {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  category    String   // Buyer Intent, Feedback, etc.
+  questions   String   // JSON array of question structures
+  theme       String   @default("{}")
+  
+  isPublic    Boolean  @default(false) // System templates vs User templates
+  tenantId    String?  // Null for system templates
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([category])
+}
+
+model FollowUpSequence {
+  id          String   @id @default(uuid())
+  surveyId    String   @unique
+  survey      Survey   @relation(fields: [surveyId], references: [id])
+  
+  steps       FollowUpStep[]
+  isActive    Boolean  @default(true)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model FollowUpStep {
+  id          String   @id @default(uuid())
+  sequenceId  String
+  sequence    FollowUpSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  
+  order       Int
+  delayHours  Int      @default(24)
+  channel     String   // email, sms, whatsapp
+  
+  templateId  String?  // Relation to stored message templates
+  content     String?  // Or direct content
+  
+  condition   String?  // JSON logic, e.g. "if status=partial"
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([sequenceId])
+}
